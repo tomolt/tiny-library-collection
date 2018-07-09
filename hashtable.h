@@ -60,8 +60,6 @@ void *htGet(struct HT *ht, void const *name, short length);
 
 #ifdef HT_IMPLEMENT_HERE
 
-#include "hashtable.h"
-
 #include <stdlib.h>
 #include <string.h>
 
