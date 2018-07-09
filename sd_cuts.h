@@ -55,3 +55,108 @@ void sd_assertsq_(char const *a, char const *b, char const *str, int ln);
 
 #endif
 
+#ifdef SD_IMPLEMENT_HERE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
+
+#define MAX_NAME_LENGTH 200
+#define MAX_DEPTH 50
+
+static char const *Stack[MAX_DEPTH];
+static int StackDepth;
+static int PrintDepth;
+static int ErrorCount;
+
+static void print_trace(void)
+{
+	int depth = PrintDepth;
+	while (depth < StackDepth) {
+		for (int i = 0; i < depth; ++i)
+			fputs("  ", stdout);
+		fputs("\\ ", stdout);
+		puts(Stack[depth]);
+		++depth;
+	}
+	PrintDepth = StackDepth;
+}
+
+void sd_init(void)
+{
+	
+}
+
+void sd_summarize(void)
+{
+	printf("-- %d failures --\n", ErrorCount);
+}
+
+int sd_is_debug(void)
+{
+#ifdef SD_DEBUG
+	return 1;
+#else
+	return 0;
+#endif
+}
+
+void sd_push(char const *format, ...)
+{
+	va_list va;
+	char *str = malloc(MAX_NAME_LENGTH);
+	va_start(va, format);
+	vsnprintf(str, MAX_NAME_LENGTH, format, va);
+	va_end(va);
+	Stack[StackDepth++] = str;
+}
+
+void sd_pop(void)
+{
+	free((char *)Stack[--StackDepth]);
+	if (PrintDepth > StackDepth)
+		--PrintDepth;
+}
+
+void sd_branchv(void (*func)(void))
+{
+	func();
+}
+
+void sd_branchvp(void (*func)(void *), void *ud)
+{
+	func(ud);
+}
+
+void sd_throw_(char const *str, int ln)
+{
+	++ErrorCount;
+	sd_push("<assert> L%03d: %s\t\t<- FAIL\n", ln, str);
+	print_trace();
+	sd_pop();
+}
+
+void sd_assert_(int cond, char const *str, int ln)
+{
+	if (!cond) sd_throw_(str, ln);
+}
+
+void sd_assertiq_(long long a, long long b, char const *str, int ln)
+{
+	if (a != b) sd_throw_(str, ln);
+}
+
+void sd_assertfq_(double a, double b, double e, char const *str, int ln)
+{
+	double d = a - b;
+	if (d < 0.0) d = -d;
+	if (d > e) sd_throw_(str, ln);
+}
+
+void sd_assertsq_(char const *a, char const *b, char const *str, int ln)
+{
+	if (strcmp(a, b) != 0) sd_throw_(str, ln);
+}
+
+#endif
