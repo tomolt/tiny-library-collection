@@ -29,38 +29,54 @@
 #ifndef SD_CUTS_H
 #define SD_CUTS_H
 
-void sd_init(void);
+enum sd_execmodel_ {
+	sd_sequential,
+	sd_resilient,
+	/* sd_parallel NYI */
+};
+
+extern enum sd_execmodel_ sd_execmodel;
+
 void sd_summarize(void);
-int sd_is_debug(void);
 
 void sd_push(char const *format, ...);
 void sd_pop(void);
+/* TODO custom throw? */
 
-void sd_branchv(void (*func)(void));
-void sd_branchvp(void (*func)(void *), void *ud);
-
-void sd_throw_(char const *str, int ln);
-void sd_assert_(int cond, char const *str, int ln);
-void sd_assertiq_(long long a, long long b, char const *str, int ln);
-void sd_assertfq_(double a, double b, double e, char const *str, int ln);
-void sd_assertsq_(char const *a, char const *b, char const *str, int ln);
-
-#define sd_assert(cond) sd_assert_(cond, #cond, __LINE__);
+void sd_branchvp(void (*func)(void *ud), void *ud);
+#define sd_branchv(func) sd_branchvp(sd_trampolinev_, (void *)(func))
 
 #define SD_EPSILON 0.00001
+
+#define sd_assert(cond) sd_assert_(cond, #cond, __LINE__);
 #define sd_assertiq(a, b) sd_assertiq_(a, b, #a "==" #b, __LINE__);
 #define sd_assertfq(a, b) sd_assertfq_(a, b, SD_EPSILON, #a "==" #b, __LINE__);
 #define sd_assertsq(a, b) sd_assertsq_(a, b, #a "==" #b, __LINE__);
 #define sd_asserteq(a, b, e) sd_assertfq_(a, b, e, #a "==" #b, __LINE__);
 
+/* internal functions that have to be visible. */
+/* do not call these directly. */
+void sd_trampolinev_(void *ud);
+void sd_assert_(int cond, char const *str, int ln);
+void sd_assertiq_(long long a, long long b, char const *str, int ln);
+void sd_assertfq_(double a, double b, double e, char const *str, int ln);
+void sd_assertsq_(char const *a, char const *b, char const *str, int ln);
+
 #endif
 
 #ifdef SD_IMPLEMENT_HERE
+
+/* TODO make thread-safe */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+
+/* dependencies of the resilient execution model */
+#include <signal.h>
+#include <setjmp.h>
+#include <float.h>
 
 #define MAX_NAME_LENGTH 200
 #define MAX_DEPTH 50
@@ -69,6 +85,46 @@ static char const *Stack[MAX_DEPTH];
 static int StackDepth;
 static int PrintDepth;
 static int ErrorCount;
+static int CrashCount;
+enum sd_execmodel_ sd_execmodel = sd_resilient;
+static sigjmp_buf *CrashJmp;
+
+static char const *name_of_signal(int signal)
+{
+	switch (signal) {
+		case SIGFPE: return "SIGFPE";
+		case SIGILL: return "SIGILL";
+		case SIGSEGV: return "SIGSEGV";
+		/* the default path should never be taken, */
+		/* as only the above signals are actually caught. */
+		default: return "unknown signal";
+	}
+}
+
+static void signal_handler(int signal)
+{
+	switch (sd_execmodel) {
+		case sd_sequential:
+			SIG_DFL(signal);
+			break;
+		case sd_resilient:
+			if (CrashJmp != NULL) {
+				if (signal == SIGFPE) {
+					/* source: https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx */
+					/* _fpreset(); TODO */
+				}
+				/* signal will never be 0, so we can pass it */
+				/* directly to longjmp without hesitation. */
+				/* source: /usr/include/bits/signum-generic.h */
+				siglongjmp(*CrashJmp, signal);
+			} else {
+				/* if there is no recovery point, we can't do anything about the signal. */
+				/* this situation should not arise during normal operation. */
+				SIG_DFL(signal);
+			}
+			break;
+	}
+}
 
 static void print_trace(void)
 {
@@ -85,21 +141,15 @@ static void print_trace(void)
 
 void sd_init(void)
 {
-	
+	/* signal() may fail, but there is nothing we can do about it. */
+	signal(SIGFPE, signal_handler);
+	signal(SIGILL, signal_handler);
+	signal(SIGSEGV, signal_handler);
 }
 
 void sd_summarize(void)
 {
-	printf("-- %d failures --\n", ErrorCount);
-}
-
-int sd_is_debug(void)
-{
-#ifdef SD_DEBUG
-	return 1;
-#else
-	return 0;
-#endif
+	printf("-- %d failures, %d crashes --\n", ErrorCount, CrashCount);
 }
 
 void sd_push(char const *format, ...)
@@ -119,44 +169,65 @@ void sd_pop(void)
 		--PrintDepth;
 }
 
-void sd_branchv(void (*func)(void))
+void sd_branchvp(void (*func)(void *ud), void *ud)
 {
+	int saved_depth = StackDepth;
+	int saved_model = sd_execmodel;
+	sigjmp_buf my_jmp, *saved_jmp;
+	saved_jmp = CrashJmp, CrashJmp = &my_jmp;
+	int signal = sigsetjmp(my_jmp, 1);
+	if (signal) {
+		++CrashCount;
+		char const *cause = name_of_signal(signal);
+		sd_push("<%s>\t\t<- CRASH\n", cause);
+		print_trace();
+		sd_pop();
+	} else {
+		func(ud);
+	}
+	CrashJmp = saved_jmp;
+	/* restore the stack in case of a crash. */
+	/* also helps recovering from missing sd_pop()'s, */
+	/* though you *really* shouldn't rely on this behaviour. */
+	while (StackDepth > saved_depth)
+		sd_pop();
+	/* restore the execmodel to allow nesting of branches */
+	/* of differing execmodels.*/
+	/* you may rely on this behaviour. */
+	sd_execmodel = saved_model;
+}
+
+void sd_trampolinev_(void *ud)
+{
+	void (*func)(void) = (void (*)(void))ud;
 	func();
-}
-
-void sd_branchvp(void (*func)(void *), void *ud)
-{
-	func(ud);
-}
-
-void sd_throw_(char const *str, int ln)
-{
-	++ErrorCount;
-	sd_push("<assert> L%03d: %s\t\t<- FAIL\n", ln, str);
-	print_trace();
-	sd_pop();
 }
 
 void sd_assert_(int cond, char const *str, int ln)
 {
-	if (!cond) sd_throw_(str, ln);
+	if (!cond) {
+		++ErrorCount;
+		sd_push("<assert> L%03d: %s\t\t<- FAIL\n", ln, str);
+		print_trace();
+		sd_pop();
+	}
 }
 
 void sd_assertiq_(long long a, long long b, char const *str, int ln)
 {
-	if (a != b) sd_throw_(str, ln);
+	sd_assert_(a == b, str, ln);
 }
 
 void sd_assertfq_(double a, double b, double e, char const *str, int ln)
 {
 	double d = a - b;
 	if (d < 0.0) d = -d;
-	if (d > e) sd_throw_(str, ln);
+	sd_assert_(d <= e, str, ln);
 }
 
 void sd_assertsq_(char const *a, char const *b, char const *str, int ln)
 {
-	if (strcmp(a, b) != 0) sd_throw_(str, ln);
+	sd_assert_(strcmp(a, b) != 0, str, ln);
 }
 
 #endif
