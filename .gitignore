@@ -1,0 +1,2 @@
+tests/all_tests
+tests/*.o
