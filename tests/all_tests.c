@@ -9,8 +9,8 @@ void hashtable_suite(void);
 int main()
 {
 	sd_init();
-	sd_branchv(calm_suite);
-	sd_branchv(hashtable_suite);
+	sd_branch(calm_suite);
+	sd_branch(hashtable_suite);
 	sd_summarize();
 	return EXIT_SUCCESS;
 }

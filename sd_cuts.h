@@ -35,16 +35,28 @@ enum sd_execmodel_ {
 	/* sd_parallel NYI */
 };
 
+struct sd_branchsaves_ {
+	int saved_depth;
+	int saved_model;
+	void *saved_jmp;
+};
+
 extern enum sd_execmodel_ sd_execmodel;
+
+void sd_init(void);
 
 void sd_summarize(void);
 
 void sd_push(char const *format, ...);
 void sd_pop(void);
-/* TODO custom throw? */
 
-void sd_branchvp(void (*func)(void *ud), void *ud);
-#define sd_branchv(func) sd_branchvp(sd_trampolinev_, (void *)(func))
+#define sd_branch(func, ...) do { \
+		struct sd_branchsaves_ s; \
+		if (sd_branchbeg(&s)) { \
+			func(__VA_ARGS__); \
+		} \
+		sd_branchend(&s); \
+	} while (0)
 
 #define SD_EPSILON 0.00001
 
@@ -53,14 +65,16 @@ void sd_branchvp(void (*func)(void *ud), void *ud);
 #define sd_assertfq(a, b) sd_assertfq_(a, b, SD_EPSILON, #a "==" #b, __LINE__);
 #define sd_assertsq(a, b) sd_assertsq_(a, b, #a "==" #b, __LINE__);
 #define sd_asserteq(a, b, e) sd_assertfq_(a, b, e, #a "==" #b, __LINE__);
+/* TODO custom throw? */
 
 /* internal functions that have to be visible. */
 /* do not call these directly. */
-void sd_trampolinev_(void *ud);
 void sd_assert_(int cond, char const *str, int ln);
 void sd_assertiq_(long long a, long long b, char const *str, int ln);
 void sd_assertfq_(double a, double b, double e, char const *str, int ln);
 void sd_assertsq_(char const *a, char const *b, char const *str, int ln);
+int sd_branchbeg_(struct sd_branchsaves_ *s);
+void sd_branchend_(struct sd_branchsaves_ *s);
 
 #endif
 
@@ -169,12 +183,9 @@ void sd_pop(void)
 		--PrintDepth;
 }
 
-void sd_branchvp(void (*func)(void *ud), void *ud)
+int sd_branchbeg(struct sd_branchsaves_ *s)
 {
-	int saved_depth = StackDepth;
-	int saved_model = sd_execmodel;
-	sigjmp_buf my_jmp, *saved_jmp;
-	saved_jmp = CrashJmp, CrashJmp = &my_jmp;
+	sigjmp_buf my_jmp;
 	int signal = sigsetjmp(my_jmp, 1);
 	if (signal) {
 		++CrashCount;
@@ -182,25 +193,26 @@ void sd_branchvp(void (*func)(void *ud), void *ud)
 		sd_push("<%s>\t\t<- CRASH\n", cause);
 		print_trace();
 		sd_pop();
+		return 0;
 	} else {
-		func(ud);
+		*s = (struct sd_branchsaves_){StackDepth, sd_execmodel, (void *)CrashJmp};
+		CrashJmp = &my_jmp;
+		return 1;
 	}
-	CrashJmp = saved_jmp;
+}
+
+void sd_branchend(struct sd_branchsaves_ *s)
+{
+	CrashJmp = s->saved_jmp;
 	/* restore the stack in case of a crash. */
 	/* also helps recovering from missing sd_pop()'s, */
 	/* though you *really* shouldn't rely on this behaviour. */
-	while (StackDepth > saved_depth)
+	while (StackDepth > s->saved_depth)
 		sd_pop();
 	/* restore the execmodel to allow nesting of branches */
 	/* of differing execmodels.*/
 	/* you may rely on this behaviour. */
-	sd_execmodel = saved_model;
-}
-
-void sd_trampolinev_(void *ud)
-{
-	void (*func)(void) = (void (*)(void))ud;
-	func();
+	sd_execmodel = s->saved_model;
 }
 
 void sd_assert_(int cond, char const *str, int ln)
