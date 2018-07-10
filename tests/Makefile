@@ -1,5 +1,5 @@
 CFLAGS+=-g -Wall -Wextra -pedantic -std=gnu99 -I.. # TODO -std=c99 or lower
-LDFLAGS+=-lm
+LDLIBS+=-lm
 
 .PHONY: all run clean
 
