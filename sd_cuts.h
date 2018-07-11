@@ -50,13 +50,13 @@ void sd_summarize(void);
 void sd_push(char const *format, ...);
 void sd_pop(void);
 
-#define sd_branch(func, ...) do { \
+#define sd_branch(code) { \
 		struct sd_branchsaves_ s; \
 		if (sd_branchbeg(&s)) { \
-			func(__VA_ARGS__); \
+			code \
 		} \
 		sd_branchend(&s); \
-	} while (0)
+	}
 
 #define SD_EPSILON 0.00001
 
