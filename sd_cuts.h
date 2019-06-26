@@ -173,8 +173,8 @@ void sd_summarize(void)
 
 void sd_push(char const *format, ...)
 {
-	va_list va;
 	char *str = malloc(MAX_NAME_LENGTH);
+	va_list va;
 	va_start(va, format);
 	vsnprintf(str, MAX_NAME_LENGTH, format, va);
 	va_end(va);
@@ -218,9 +218,14 @@ void sd_branchend_(struct sd_branchsaves_ *s)
 
 void sd_throw_(int ln, char const *format, ...)
 {
-	/* TODO formatting */
 	++ErrorCount;
-	sd_push("<throw> L%03d: %s\t\t<- FAIL\n", ln, format);
+	char *str = malloc(MAX_NAME_LENGTH);
+	va_list va;
+	va_start(va, format);
+	vsnprintf(str, MAX_NAME_LENGTH, format, va);
+	va_end(va);
+	sd_push("<throw> L%03d: %s\t\t<- FAIL\n", ln, str);
+	free(str);
 	print_trace();
 	sd_pop();
 }
