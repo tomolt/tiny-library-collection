@@ -88,6 +88,22 @@ void sd_branchend_(struct sd_branchsaves_ *s);
 
 /* TODO make thread-safe */
 
+#ifdef SD_ASCII_ONLY
+
+# define TEXT_DOTS  ".."
+# define TEXT_HIER  "\\ "
+# define TEXT_ARROW "<-"
+# define TEXT_LINE  "--"
+
+#else
+
+# define TEXT_DOTS  "\u2024\u2024"
+# define TEXT_HIER  "\u2514 "
+# define TEXT_ARROW "\u2190"
+# define TEXT_LINE  "\u2500\u2500"
+
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -150,8 +166,8 @@ static void print_trace(void)
 	int depth = PrintDepth;
 	while (depth < StackDepth) {
 		for (int i = 0; i < depth; ++i)
-			fputs("  ", stdout);
-		fputs("\\ ", stdout);
+			fputs(TEXT_DOTS, stdout);
+		fputs(TEXT_HIER, stdout);
 		puts(Stack[depth]);
 		++depth;
 	}
@@ -168,7 +184,7 @@ void sd_init(void)
 
 void sd_summarize(void)
 {
-	printf("-- %d failures, %d crashes --\n", ErrorCount, CrashCount);
+	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", ErrorCount, CrashCount);
 }
 
 void sd_push(char const *format, ...)
@@ -193,7 +209,7 @@ void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
 	if (signal) {
 		++CrashCount;
 		char const *cause = name_of_signal(signal);
-		sd_push("<%s>\t\t<- CRASH\n", cause);
+		sd_push("<%s>\t\t" TEXT_ARROW " CRASH\n", cause);
 		print_trace();
 		sd_pop();
 	} else {
@@ -224,7 +240,7 @@ void sd_throw_(int ln, char const *format, ...)
 	va_start(va, format);
 	vsnprintf(str, MAX_NAME_LENGTH, format, va);
 	va_end(va);
-	sd_push("<throw> L%03d: %s\t\t<- FAIL\n", ln, str);
+	sd_push("<throw> L%03d: %s\t\t" TEXT_ARROW " FAIL\n", ln, str);
 	free(str);
 	print_trace();
 	sd_pop();
@@ -234,7 +250,7 @@ void sd_assert_(int cond, char const *str, int ln)
 {
 	if (!cond) {
 		++ErrorCount;
-		sd_push("<assert> L%03d: %s\t\t<- FAIL\n", ln, str);
+		sd_push("<assert> L%03d: %s\t\t" TEXT_ARROW " FAIL\n", ln, str);
 		print_trace();
 		sd_pop();
 	}
