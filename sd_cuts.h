@@ -65,15 +65,16 @@ void sd_pop(void);
 
 #define SD_EPSILON 0.00001
 
-#define sd_assert(cond) sd_assert_(cond, #cond, __LINE__);
-#define sd_assertiq(a, b) sd_assertiq_(a, b, #a "==" #b, __LINE__);
-#define sd_assertfq(a, b) sd_assertfq_(a, b, SD_EPSILON, #a "==" #b, __LINE__);
-#define sd_assertsq(a, b) sd_assertsq_(a, b, #a "==" #b, __LINE__);
-#define sd_asserteq(a, b, e) sd_assertfq_(a, b, e, #a "==" #b, __LINE__);
-/* TODO custom throw? */
+#define sd_throw(format, ...) sd_throw_(__LINE__, format, __VA_ARGS__)
+#define sd_assert(cond) sd_assert_(cond, #cond, __LINE__)
+#define sd_assertiq(a, b) sd_assertiq_(a, b, #a "==" #b, __LINE__)
+#define sd_assertfq(a, b) sd_assertfq_(a, b, SD_EPSILON, #a "==" #b, __LINE__)
+#define sd_assertsq(a, b) sd_assertsq_(a, b, #a "==" #b, __LINE__)
+#define sd_asserteq(a, b, e) sd_assertfq_(a, b, e, #a "==" #b, __LINE__)
 
 /* internal functions that have to be visible. */
 /* do not call these directly. */
+void sd_throw_(int ln, char const *format, ...);
 void sd_assert_(int cond, char const *str, int ln);
 void sd_assertiq_(long long a, long long b, char const *str, int ln);
 void sd_assertfq_(double a, double b, double e, char const *str, int ln);
@@ -213,6 +214,15 @@ void sd_branchend_(struct sd_branchsaves_ *s)
 	/* of differing execmodels.*/
 	/* you may rely on this behaviour. */
 	sd_execmodel = s->saved_model;
+}
+
+void sd_throw_(int ln, char const *format, ...)
+{
+	/* TODO formatting */
+	++ErrorCount;
+	sd_push("<throw> L%03d: %s\t\t<- FAIL\n", ln, format);
+	print_trace();
+	sd_pop();
 }
 
 void sd_assert_(int cond, char const *str, int ln)
