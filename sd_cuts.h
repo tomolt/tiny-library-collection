@@ -116,13 +116,18 @@ void sd_branchend_(struct sd_branchsaves_ *s);
 #define MAX_NAME_LENGTH 200
 #define MAX_DEPTH 50
 
-static char const *Stack[MAX_DEPTH];
-static int StackDepth;
-static int PrintDepth;
-static int ErrorCount;
-static int CrashCount;
 enum sd_execmodel_ sd_execmodel = sd_resilient;
-static sigjmp_buf *CrashJmp;
+
+struct sd_T {
+	int StackDepth;
+	int PrintDepth;
+	int ErrorCount;
+	int CrashCount;
+	sigjmp_buf *CrashJmp;
+	char const *Stack[MAX_DEPTH];
+};
+
+static struct sd_T sd_T;
 
 static char const *name_of_signal(int signal)
 {
@@ -143,7 +148,7 @@ static void signal_handler(int signal)
 			SIG_DFL(signal);
 			break;
 		case sd_resilient:
-			if (CrashJmp != NULL) {
+			if (sd_T.CrashJmp != NULL) {
 				if (signal == SIGFPE) {
 					/* source: https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx */
 					/* _fpreset(); TODO */
@@ -151,7 +156,7 @@ static void signal_handler(int signal)
 				/* signal will never be 0, so we can pass it */
 				/* directly to longjmp without hesitation. */
 				/* source: /usr/include/bits/signum-generic.h */
-				siglongjmp(*CrashJmp, signal);
+				siglongjmp(*sd_T.CrashJmp, signal);
 			} else {
 				/* if there is no recovery point, we can't do anything about the signal. */
 				/* this situation should not arise during normal operation. */
@@ -163,15 +168,15 @@ static void signal_handler(int signal)
 
 static void print_trace(void)
 {
-	int depth = PrintDepth;
-	while (depth < StackDepth) {
+	int depth = sd_T.PrintDepth;
+	while (depth < sd_T.StackDepth) {
 		for (int i = 0; i < depth; ++i)
 			fputs(TEXT_DOTS, stdout);
 		fputs(TEXT_HIER, stdout);
-		puts(Stack[depth]);
+		puts(sd_T.Stack[depth]);
 		++depth;
 	}
-	PrintDepth = StackDepth;
+	sd_T.PrintDepth = sd_T.StackDepth;
 }
 
 void sd_init(void)
@@ -184,7 +189,7 @@ void sd_init(void)
 
 void sd_summarize(void)
 {
-	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", ErrorCount, CrashCount);
+	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", sd_T.ErrorCount, sd_T.CrashCount);
 }
 
 void sd_push(char const *format, ...)
@@ -194,37 +199,37 @@ void sd_push(char const *format, ...)
 	va_start(va, format);
 	vsnprintf(str, MAX_NAME_LENGTH, format, va);
 	va_end(va);
-	Stack[StackDepth++] = str;
+	sd_T.Stack[sd_T.StackDepth++] = str;
 }
 
 void sd_pop(void)
 {
-	free((char *)Stack[--StackDepth]);
-	if (PrintDepth > StackDepth)
-		--PrintDepth;
+	free((char *)sd_T.Stack[--sd_T.StackDepth]);
+	if (sd_T.PrintDepth > sd_T.StackDepth)
+		--sd_T.PrintDepth;
 }
 
 void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
 {
 	if (signal) {
-		++CrashCount;
+		++sd_T.CrashCount;
 		char const *cause = name_of_signal(signal);
 		sd_push("<%s>\t\t" TEXT_ARROW " CRASH\n", cause);
 		print_trace();
 		sd_pop();
 	} else {
-		*s = (struct sd_branchsaves_){StackDepth, sd_execmodel, (void *)CrashJmp};
-		CrashJmp = my_jmp;
+		*s = (struct sd_branchsaves_){sd_T.StackDepth, sd_execmodel, (void *)sd_T.CrashJmp};
+		sd_T.CrashJmp = my_jmp;
 	}
 }
 
 void sd_branchend_(struct sd_branchsaves_ *s)
 {
-	CrashJmp = s->saved_jmp;
+	sd_T.CrashJmp = s->saved_jmp;
 	/* restore the stack in case of a crash. */
 	/* also helps recovering from missing sd_pop()'s, */
 	/* though you *really* shouldn't rely on this behaviour. */
-	while (StackDepth > s->saved_depth)
+	while (sd_T.StackDepth > s->saved_depth)
 		sd_pop();
 	/* restore the execmodel to allow nesting of branches */
 	/* of differing execmodels.*/
@@ -234,7 +239,7 @@ void sd_branchend_(struct sd_branchsaves_ *s)
 
 void sd_throw_(int ln, char const *format, ...)
 {
-	++ErrorCount;
+	++sd_T.ErrorCount;
 	char *str = malloc(MAX_NAME_LENGTH);
 	va_list va;
 	va_start(va, format);
@@ -249,7 +254,7 @@ void sd_throw_(int ln, char const *format, ...)
 void sd_assert_(int cond, char const *str, int ln)
 {
 	if (!cond) {
-		++ErrorCount;
+		++sd_T.ErrorCount;
 		sd_push("<assert> L%03d: %s\t\t" TEXT_ARROW " FAIL\n", ln, str);
 		print_trace();
 		sd_pop();
