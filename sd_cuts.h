@@ -182,10 +182,14 @@ static void print_trace(void)
 
 void sd_init(void)
 {
-	/* signal() may fail, but there is nothing we can do about it. */
-	signal(SIGFPE, signal_handler);
-	signal(SIGILL, signal_handler);
-	signal(SIGSEGV, signal_handler);
+	struct sigaction action;
+	memset(&action, 0, sizeof(struct sigaction));
+	action.sa_handler = signal_handler;
+	sigemptyset(&action.sa_mask);
+	/* TODO error checking */
+	sigaction(SIGFPE, &action, NULL);
+	sigaction(SIGILL, &action, NULL);
+	sigaction(SIGSEGV, &action, NULL);
 }
 
 void sd_query(int *errors, int *crashes)
