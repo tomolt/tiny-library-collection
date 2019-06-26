@@ -29,6 +29,8 @@
 #ifndef SD_CUTS_H
 #define SD_CUTS_H
 
+#include <setjmp.h>
+
 enum sd_execmodel_ {
 	sd_sequential,
 	sd_resilient,
@@ -52,10 +54,13 @@ void sd_pop(void);
 
 #define sd_branch(code) { \
 		struct sd_branchsaves_ s; \
-		if (sd_branchbeg(&s)) { \
+		sigjmp_buf my_jmp; \
+		int signal = sigsetjmp(my_jmp, 1); \
+		sd_branchbeg_(signal, &my_jmp, &s); \
+		if (!signal) { \
 			code \
 		} \
-		sd_branchend(&s); \
+		sd_branchend_(&s); \
 	}
 
 #define SD_EPSILON 0.00001
@@ -73,7 +78,7 @@ void sd_assert_(int cond, char const *str, int ln);
 void sd_assertiq_(long long a, long long b, char const *str, int ln);
 void sd_assertfq_(double a, double b, double e, char const *str, int ln);
 void sd_assertsq_(char const *a, char const *b, char const *str, int ln);
-int sd_branchbeg_(struct sd_branchsaves_ *s);
+void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s);
 void sd_branchend_(struct sd_branchsaves_ *s);
 
 #endif
@@ -89,7 +94,6 @@ void sd_branchend_(struct sd_branchsaves_ *s);
 
 /* dependencies of the resilient execution model */
 #include <signal.h>
-#include <setjmp.h>
 #include <float.h>
 
 #define MAX_NAME_LENGTH 200
@@ -183,25 +187,21 @@ void sd_pop(void)
 		--PrintDepth;
 }
 
-int sd_branchbeg(struct sd_branchsaves_ *s)
+void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
 {
-	sigjmp_buf my_jmp;
-	int signal = sigsetjmp(my_jmp, 1);
 	if (signal) {
 		++CrashCount;
 		char const *cause = name_of_signal(signal);
 		sd_push("<%s>\t\t<- CRASH\n", cause);
 		print_trace();
 		sd_pop();
-		return 0;
 	} else {
 		*s = (struct sd_branchsaves_){StackDepth, sd_execmodel, (void *)CrashJmp};
-		CrashJmp = &my_jmp;
-		return 1;
+		CrashJmp = my_jmp;
 	}
 }
 
-void sd_branchend(struct sd_branchsaves_ *s)
+void sd_branchend_(struct sd_branchsaves_ *s)
 {
 	CrashJmp = s->saved_jmp;
 	/* restore the stack in case of a crash. */
