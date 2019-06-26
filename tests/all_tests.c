@@ -5,6 +5,7 @@
 
 void calm_suite(void);
 void hashtable_suite(void);
+void sd_cuts_suite(void);
 
 int main()
 {
@@ -14,6 +15,9 @@ int main()
 	)
 	sd_branch (
 		hashtable_suite();
+	)
+	sd_branch (
+		sd_cuts_suite();
 	)
 	sd_summarize();
 	return EXIT_SUCCESS;
