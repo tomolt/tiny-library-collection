@@ -48,6 +48,7 @@ extern enum sd_execmodel_ sd_execmodel;
 void sd_init(void);
 
 void sd_summarize(void);
+void sd_query(int *errors, int *crashes);
 
 void sd_push(char const *format, ...);
 void sd_pop(void);
@@ -185,6 +186,16 @@ void sd_init(void)
 	signal(SIGFPE, signal_handler);
 	signal(SIGILL, signal_handler);
 	signal(SIGSEGV, signal_handler);
+}
+
+void sd_query(int *errors, int *crashes)
+{
+	if (errors != NULL) {
+		*errors = sd_T.ErrorCount;
+	}
+	if (crashes != NULL) {
+		*crashes = sd_T.CrashCount;
+	}
 }
 
 void sd_summarize(void)
