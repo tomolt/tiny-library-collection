@@ -7,13 +7,12 @@
 
 #include "sd_cuts.h"
 
-static void test_resilient(void)
+static void test_crash_recovery(void)
 {
-	sd_push("resilient mode");
+	sd_push("crash recovery");
 	pid_t pid = fork();
 	if (pid == 0) {
 		freopen("/dev/null", "w", stdout);
-		sd_execmodel = sd_resilient;
 		sd_branch( raise(SIGFPE); )
 		exit(0);
 	}
@@ -28,7 +27,7 @@ static void test_resilient(void)
 void sd_cuts_suite(void)
 {
 	sd_push("sd_cuts");
-	test_resilient();
+	test_crash_recovery();
 	sd_pop();
 }
 

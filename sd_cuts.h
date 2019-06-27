@@ -31,19 +31,10 @@
 
 #include <setjmp.h>
 
-enum sd_execmodel_ {
-	sd_sequential,
-	sd_resilient,
-	/* sd_parallel NYI */
-};
-
 struct sd_branchsaves_ {
 	int saved_depth;
-	int saved_model;
 	void *saved_jmp;
 };
-
-extern enum sd_execmodel_ sd_execmodel;
 
 void sd_init(void);
 
@@ -110,14 +101,11 @@ void sd_branchend_(struct sd_branchsaves_ *s);
 #include <stdarg.h>
 #include <string.h>
 
-/* dependencies of the resilient execution model */
 #include <signal.h>
 #include <float.h>
 
 #define MAX_NAME_LENGTH 200
 #define MAX_DEPTH 50
-
-enum sd_execmodel_ sd_execmodel = sd_resilient;
 
 struct sd_T {
 	int StackDepth;
@@ -144,26 +132,18 @@ static char const *name_of_signal(int signal)
 
 static void signal_handler(int signal)
 {
-	switch (sd_execmodel) {
-		case sd_sequential:
-			SIG_DFL(signal);
-			break;
-		case sd_resilient:
-			if (sd_T.CrashJmp != NULL) {
-				if (signal == SIGFPE) {
-					/* source: https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx */
-					/* _fpreset(); TODO */
-				}
-				/* signal will never be 0, so we can pass it */
-				/* directly to longjmp without hesitation. */
-				/* source: /usr/include/bits/signum-generic.h */
-				siglongjmp(*sd_T.CrashJmp, signal);
-			} else {
-				/* if there is no recovery point, we can't do anything about the signal. */
-				/* this situation should not arise during normal operation. */
-				SIG_DFL(signal);
-			}
-			break;
+	if (sd_T.CrashJmp != NULL) {
+		if (signal == SIGFPE) {
+			/* source: https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx */
+			/* _fpreset(); TODO */
+		}
+		/* signal will never be 0, so we can pass it */
+		/* directly to longjmp without hesitation. */
+		/* source: /usr/include/bits/signum-generic.h */
+		siglongjmp(*sd_T.CrashJmp, signal);
+	} else {
+		/* if there is no recovery point, we can't do anything about the signal. */
+		/* this situation should not arise during normal operation. */
 	}
 }
 
@@ -204,7 +184,8 @@ void sd_query(int *errors, int *crashes)
 
 void sd_summarize(void)
 {
-	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", sd_T.ErrorCount, sd_T.CrashCount);
+	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n",
+		sd_T.ErrorCount, sd_T.CrashCount);
 }
 
 void sd_push(char const *format, ...)
@@ -233,7 +214,7 @@ void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
 		print_trace();
 		sd_pop();
 	} else {
-		*s = (struct sd_branchsaves_){sd_T.StackDepth, sd_execmodel, (void *)sd_T.CrashJmp};
+		*s = (struct sd_branchsaves_){sd_T.StackDepth, (void *)sd_T.CrashJmp};
 		sd_T.CrashJmp = my_jmp;
 	}
 }
@@ -246,10 +227,6 @@ void sd_branchend_(struct sd_branchsaves_ *s)
 	/* though you *really* shouldn't rely on this behaviour. */
 	while (sd_T.StackDepth > s->saved_depth)
 		sd_pop();
-	/* restore the execmodel to allow nesting of branches */
-	/* of differing execmodels.*/
-	/* you may rely on this behaviour. */
-	sd_execmodel = s->saved_model;
 }
 
 void sd_throw_(int ln, char const *format, ...)
