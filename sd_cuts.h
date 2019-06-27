@@ -33,7 +33,7 @@
 
 struct sd_branchsaves_ {
 	int saved_depth;
-	void *saved_jmp;
+	void *saved_jump;
 };
 
 void sd_init(void);
@@ -108,12 +108,12 @@ void sd_branchend_(struct sd_branchsaves_ *s);
 #define MAX_DEPTH 50
 
 struct sd_T {
-	int StackDepth;
-	int PrintDepth;
-	int ErrorCount;
-	int CrashCount;
-	sigjmp_buf *CrashJmp;
-	char const *Stack[MAX_DEPTH];
+	int stack_depth;
+	int print_depth;
+	int error_count;
+	int crash_count;
+	sigjmp_buf *crash_jump;
+	char const *stack[MAX_DEPTH];
 };
 
 static struct sd_T sd_T;
@@ -132,7 +132,7 @@ static char const *name_of_signal(int signal)
 
 static void signal_handler(int signal)
 {
-	if (sd_T.CrashJmp != NULL) {
+	if (sd_T.crash_jump != NULL) {
 		if (signal == SIGFPE) {
 			/* source: https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx */
 			/* _fpreset(); TODO */
@@ -140,7 +140,7 @@ static void signal_handler(int signal)
 		/* signal will never be 0, so we can pass it */
 		/* directly to longjmp without hesitation. */
 		/* source: /usr/include/bits/signum-generic.h */
-		siglongjmp(*sd_T.CrashJmp, signal);
+		siglongjmp(*sd_T.crash_jump, signal);
 	} else {
 		/* if there is no recovery point, we can't do anything about the signal. */
 		/* this situation should not arise during normal operation. */
@@ -149,15 +149,15 @@ static void signal_handler(int signal)
 
 static void print_trace(void)
 {
-	int depth = sd_T.PrintDepth;
-	while (depth < sd_T.StackDepth) {
+	int depth = sd_T.print_depth;
+	while (depth < sd_T.stack_depth) {
 		for (int i = 0; i < depth; ++i)
 			fputs(TEXT_DOTS, stdout);
 		fputs(TEXT_HIER, stdout);
-		puts(sd_T.Stack[depth]);
+		puts(sd_T.stack[depth]);
 		++depth;
 	}
-	sd_T.PrintDepth = sd_T.StackDepth;
+	sd_T.print_depth = sd_T.stack_depth;
 }
 
 void sd_init(void)
@@ -175,17 +175,17 @@ void sd_init(void)
 void sd_query(int *errors, int *crashes)
 {
 	if (errors != NULL) {
-		*errors = sd_T.ErrorCount;
+		*errors = sd_T.error_count;
 	}
 	if (crashes != NULL) {
-		*crashes = sd_T.CrashCount;
+		*crashes = sd_T.crash_count;
 	}
 }
 
 void sd_summarize(void)
 {
 	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n",
-		sd_T.ErrorCount, sd_T.CrashCount);
+		sd_T.error_count, sd_T.crash_count);
 }
 
 void sd_push(char const *format, ...)
@@ -195,43 +195,43 @@ void sd_push(char const *format, ...)
 	va_start(va, format);
 	vsnprintf(str, MAX_NAME_LENGTH, format, va);
 	va_end(va);
-	sd_T.Stack[sd_T.StackDepth++] = str;
+	sd_T.stack[sd_T.stack_depth++] = str;
 }
 
 void sd_pop(void)
 {
-	free((char *)sd_T.Stack[--sd_T.StackDepth]);
-	if (sd_T.PrintDepth > sd_T.StackDepth)
-		--sd_T.PrintDepth;
+	free((char *)sd_T.stack[--sd_T.stack_depth]);
+	if (sd_T.print_depth > sd_T.stack_depth)
+		--sd_T.print_depth;
 }
 
 void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
 {
 	if (signal) {
-		++sd_T.CrashCount;
+		++sd_T.crash_count;
 		char const *cause = name_of_signal(signal);
 		sd_push("<%s>\t\t" TEXT_ARROW " CRASH\n", cause);
 		print_trace();
 		sd_pop();
 	} else {
-		*s = (struct sd_branchsaves_){sd_T.StackDepth, (void *)sd_T.CrashJmp};
-		sd_T.CrashJmp = my_jmp;
+		*s = (struct sd_branchsaves_){sd_T.stack_depth, (void *)sd_T.crash_jump};
+		sd_T.crash_jump = my_jmp;
 	}
 }
 
 void sd_branchend_(struct sd_branchsaves_ *s)
 {
-	sd_T.CrashJmp = s->saved_jmp;
+	sd_T.crash_jump = s->saved_jump;
 	/* restore the stack in case of a crash. */
 	/* also helps recovering from missing sd_pop()'s, */
 	/* though you *really* shouldn't rely on this behaviour. */
-	while (sd_T.StackDepth > s->saved_depth)
+	while (sd_T.stack_depth > s->saved_depth)
 		sd_pop();
 }
 
 void sd_throw_(int ln, char const *format, ...)
 {
-	++sd_T.ErrorCount;
+	++sd_T.error_count;
 	char *str = malloc(MAX_NAME_LENGTH);
 	va_list va;
 	va_start(va, format);
@@ -246,7 +246,7 @@ void sd_throw_(int ln, char const *format, ...)
 void sd_assert_(int cond, char const *str, int ln)
 {
 	if (!cond) {
-		++sd_T.ErrorCount;
+		++sd_T.error_count;
 		sd_push("<assert> L%03d: %s\t\t" TEXT_ARROW " FAIL\n", ln, str);
 		print_trace();
 		sd_pop();
