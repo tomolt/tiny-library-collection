@@ -112,7 +112,9 @@ enum { THROW, ASSERT };
 
 #define NO_LINENO -1
 
-struct sd_T {
+int const caught_signals[] = { SIGILL, SIGFPE, SIGSEGV, SIGBUS, SIGSYS, SIGPIPE, 0 };
+
+struct sd_this {
 	int stack_depth;
 	int print_depth;
 	int error_count;
@@ -121,11 +123,26 @@ struct sd_T {
 	char const *stack[MAX_DEPTH];
 };
 
-static struct sd_T sd_T;
+static struct sd_this sd_this;
+
+static char const *name_of_signal(int signal)
+{
+	switch (signal) {
+		case SIGILL:  return "SIGILL";  break;
+		case SIGFPE:  return "SIGFPE";  break;
+		case SIGSEGV: return "SIGSEGV"; break;
+		case SIGBUS:  return "SIGBUS";  break;
+		case SIGSYS:  return "SIGSYS";  break;
+		case SIGPIPE: return "SIGPIPE"; break;
+		/* the default path should never be taken, */
+		/* as only the above signals are actually caught. */
+		default: return "unknown signal"; break;
+	}
+}
 
 static void signal_handler(int signal)
 {
-	if (sd_T.crash_jump != NULL) {
+	if (sd_this.crash_jump != NULL) {
 		if (signal == SIGFPE) {
 			/* source: https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx */
 			/* _fpreset(); TODO */
@@ -133,7 +150,7 @@ static void signal_handler(int signal)
 		/* signal will never be 0, so we can pass it */
 		/* directly to longjmp without hesitation. */
 		/* source: /usr/include/bits/signum-generic.h */
-		siglongjmp(*sd_T.crash_jump, signal);
+		siglongjmp(*sd_this.crash_jump, signal);
 	} else {
 		/* if there is no recovery point, we can't do anything about the signal. */
 		/* this situation should not arise during normal operation. */
@@ -142,15 +159,15 @@ static void signal_handler(int signal)
 
 static void print_trace(void)
 {
-	int depth = sd_T.print_depth;
-	while (depth < sd_T.stack_depth) {
+	int depth = sd_this.print_depth;
+	while (depth < sd_this.stack_depth) {
 		for (int i = 0; i < depth; ++i)
 			fputs(TEXT_DOTS, stdout);
 		fputs(TEXT_HIER, stdout);
-		puts(sd_T.stack[depth]);
+		puts(sd_this.stack[depth]);
 		++depth;
 	}
-	sd_T.print_depth = sd_T.stack_depth;
+	sd_this.print_depth = sd_this.stack_depth;
 }
 
 static void report(int kind, int signal, int ln, char const *msg)
@@ -158,7 +175,7 @@ static void report(int kind, int signal, int ln, char const *msg)
 	char const *kind_name, *signal_name;
 	switch (kind) {
 		case FAIL:
-			++sd_T.error_count;
+			++sd_this.error_count;
 			kind_name = "FAIL";
 			switch (signal) {
 				case THROW: signal_name = "throw"; break;
@@ -166,16 +183,9 @@ static void report(int kind, int signal, int ln, char const *msg)
 			}
 			break;
 		case CRASH:
-			++sd_T.crash_count;
+			++sd_this.crash_count;
 			kind_name = "CRASH";
-			switch (signal) {
-				case SIGFPE: signal_name = "SIGFPE"; break;
-				case SIGILL: signal_name = "SIGILL"; break;
-				case SIGSEGV: signal_name = "SIGSEGV"; break;
-				/* the default path should never be taken, */
-				/* as only the above signals are actually caught. */
-				default: signal_name = "unknown signal"; break;
-			}
+			signal_name = name_of_signal(signal);
 			break;
 	}
 	if (ln == NO_LINENO) {
@@ -194,18 +204,19 @@ void sd_init(void)
 	action.sa_handler = signal_handler;
 	sigemptyset(&action.sa_mask);
 	/* TODO error checking */
-	sigaction(SIGFPE, &action, NULL);
-	sigaction(SIGILL, &action, NULL);
-	sigaction(SIGSEGV, &action, NULL);
+	int i;
+	for (i = 0; caught_signals[i] != 0; ++i) {
+		sigaction(caught_signals[i], &action, NULL);
+	}
 }
 
 void sd_report(int *errors, int *crashes)
 {
 	if (errors != NULL) {
-		*errors = sd_T.error_count;
+		*errors = sd_this.error_count;
 	}
 	if (crashes != NULL) {
-		*crashes = sd_T.crash_count;
+		*crashes = sd_this.crash_count;
 	}
 }
 
@@ -223,14 +234,14 @@ void sd_push(char const *format, ...)
 	va_start(va, format);
 	vsnprintf(str, MAX_NAME_LENGTH, format, va);
 	va_end(va);
-	sd_T.stack[sd_T.stack_depth++] = str;
+	sd_this.stack[sd_this.stack_depth++] = str;
 }
 
 void sd_pop(void)
 {
-	free((char *)sd_T.stack[--sd_T.stack_depth]);
-	if (sd_T.print_depth > sd_T.stack_depth)
-		--sd_T.print_depth;
+	free((char *)sd_this.stack[--sd_this.stack_depth]);
+	if (sd_this.print_depth > sd_this.stack_depth)
+		--sd_this.print_depth;
 }
 
 void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
@@ -238,18 +249,18 @@ void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
 	if (signal) {
 		report(CRASH, signal, NO_LINENO, "");
 	} else {
-		*s = (struct sd_branchsaves_){sd_T.stack_depth, (void *)sd_T.crash_jump};
-		sd_T.crash_jump = my_jmp;
+		*s = (struct sd_branchsaves_){sd_this.stack_depth, (void *)sd_this.crash_jump};
+		sd_this.crash_jump = my_jmp;
 	}
 }
 
 void sd_branchend_(struct sd_branchsaves_ *s)
 {
-	sd_T.crash_jump = s->saved_jump;
+	sd_this.crash_jump = s->saved_jump;
 	/* restore the stack in case of a crash. */
 	/* also helps recovering from missing sd_pop()'s, */
 	/* though you *really* shouldn't rely on this behaviour. */
-	while (sd_T.stack_depth > s->saved_depth)
+	while (sd_this.stack_depth > s->saved_depth)
 		sd_pop();
 }
 
