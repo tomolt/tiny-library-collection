@@ -38,8 +38,8 @@ struct sd_branchsaves_ {
 
 void sd_init(void);
 
+void sd_report(int *errors, int *crashes);
 void sd_summarize(void);
-void sd_query(int *errors, int *crashes);
 
 void sd_push(char const *format, ...);
 void sd_pop(void);
@@ -107,6 +107,11 @@ void sd_branchend_(struct sd_branchsaves_ *s);
 #define MAX_NAME_LENGTH 200
 #define MAX_DEPTH 50
 
+enum { FAIL, CRASH };
+enum { THROW, ASSERT };
+
+#define NO_LINENO -1
+
 struct sd_T {
 	int stack_depth;
 	int print_depth;
@@ -117,18 +122,6 @@ struct sd_T {
 };
 
 static struct sd_T sd_T;
-
-static char const *name_of_signal(int signal)
-{
-	switch (signal) {
-		case SIGFPE: return "SIGFPE";
-		case SIGILL: return "SIGILL";
-		case SIGSEGV: return "SIGSEGV";
-		/* the default path should never be taken, */
-		/* as only the above signals are actually caught. */
-		default: return "unknown signal";
-	}
-}
 
 static void signal_handler(int signal)
 {
@@ -160,6 +153,40 @@ static void print_trace(void)
 	sd_T.print_depth = sd_T.stack_depth;
 }
 
+static void report(int kind, int signal, int ln, char const *msg)
+{
+	char const *kind_name, *signal_name;
+	switch (kind) {
+		case FAIL:
+			++sd_T.error_count;
+			kind_name = "FAIL";
+			switch (signal) {
+				case THROW: signal_name = "throw"; break;
+				case ASSERT: signal_name = "assert"; break;
+			}
+			break;
+		case CRASH:
+			++sd_T.crash_count;
+			kind_name = "CRASH";
+			switch (signal) {
+				case SIGFPE: signal_name = "SIGFPE"; break;
+				case SIGILL: signal_name = "SIGILL"; break;
+				case SIGSEGV: signal_name = "SIGSEGV"; break;
+				/* the default path should never be taken, */
+				/* as only the above signals are actually caught. */
+				default: signal_name = "unknown signal"; break;
+			}
+			break;
+	}
+	if (ln == NO_LINENO) {
+		sd_push("<%s> %s\t\t" TEXT_ARROW "%s", signal_name, msg, kind_name);
+	} else {
+		sd_push("<%s> L%03d: %s\t\t" TEXT_ARROW "%s", signal_name, ln, msg, kind_name);
+	}
+	print_trace();
+	sd_pop();
+}
+
 void sd_init(void)
 {
 	struct sigaction action;
@@ -172,7 +199,7 @@ void sd_init(void)
 	sigaction(SIGSEGV, &action, NULL);
 }
 
-void sd_query(int *errors, int *crashes)
+void sd_report(int *errors, int *crashes)
 {
 	if (errors != NULL) {
 		*errors = sd_T.error_count;
@@ -184,8 +211,9 @@ void sd_query(int *errors, int *crashes)
 
 void sd_summarize(void)
 {
-	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n",
-		sd_T.error_count, sd_T.crash_count);
+	int errors, crashes;
+	sd_report(&errors, &crashes);
+	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", errors, crashes);
 }
 
 void sd_push(char const *format, ...)
@@ -208,11 +236,7 @@ void sd_pop(void)
 void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
 {
 	if (signal) {
-		++sd_T.crash_count;
-		char const *cause = name_of_signal(signal);
-		sd_push("<%s>\t\t" TEXT_ARROW " CRASH\n", cause);
-		print_trace();
-		sd_pop();
+		report(CRASH, signal, NO_LINENO, "");
 	} else {
 		*s = (struct sd_branchsaves_){sd_T.stack_depth, (void *)sd_T.crash_jump};
 		sd_T.crash_jump = my_jmp;
@@ -231,26 +255,18 @@ void sd_branchend_(struct sd_branchsaves_ *s)
 
 void sd_throw_(int ln, char const *format, ...)
 {
-	++sd_T.error_count;
 	char *str = malloc(MAX_NAME_LENGTH);
 	va_list va;
 	va_start(va, format);
 	vsnprintf(str, MAX_NAME_LENGTH, format, va);
 	va_end(va);
-	sd_push("<throw> L%03d: %s\t\t" TEXT_ARROW " FAIL\n", ln, str);
+	report(FAIL, THROW, ln, str);
 	free(str);
-	print_trace();
-	sd_pop();
 }
 
 void sd_assert_(int cond, char const *str, int ln)
 {
-	if (!cond) {
-		++sd_T.error_count;
-		sd_push("<assert> L%03d: %s\t\t" TEXT_ARROW " FAIL\n", ln, str);
-		print_trace();
-		sd_pop();
-	}
+	if (!cond) report(FAIL, ASSERT, ln, str);
 }
 
 void sd_assertiq_(long long a, long long b, char const *str, int ln)
