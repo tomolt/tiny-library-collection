@@ -87,7 +87,7 @@ void sd_branch_end_(struct sd_branch_saves_ *s);
 
 #ifdef SD_IMPLEMENT_HERE
 
-#ifdef SD_OPTION_ASCII_ONLY
+#if SD_OPTION_ASCII_ONLY
 
 # define TEXT_DOTS  ".."
 # define TEXT_HIER  "\\ "
@@ -210,7 +210,7 @@ void sd_summarize(void)
 	mtx_lock(&sd_sink.mutex);
 #endif
 
-#ifndef SD_OPTION_PEDANTIC
+#if !SD_OPTION_PEDANTIC
 	if (sd_sink.error_count != 0 || sd_sink.crash_count != 0)
 #endif
 	{
