@@ -45,7 +45,6 @@ struct sd_branch_saves_ {
 
 void sd_init(FILE *pipe);
 
-void sd_report(int *errors, int *crashes);
 void sd_summarize(void);
 
 void sd_push(char const *format, ...);
@@ -229,6 +228,7 @@ static void print_trace(void)
 	while (depth < sd_this.stack_depth) {
 		print_nesting(depth);
 		fputs(sd_this.stack[depth], sd_sink.pipe);
+		fputs("\n", sd_sink.pipe);
 		++depth;
 	}
 	sd_sink.print_depth = sd_this.stack_depth;
@@ -254,7 +254,7 @@ static void report(int kind, int signal, int ln, char const *msg)
 	}
 
 	print_trace();
-	print_nesting(sd_sink.print_depth + 1);
+	print_nesting(sd_sink.print_depth);
 	fprintf(sd_sink.pipe, "triggered %s", signal_name);
 	if (ln != NO_LINENO) {
 		fprintf(sd_sink.pipe, " in line %03d", ln);
