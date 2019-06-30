@@ -115,15 +115,19 @@ enum { THROW, ASSERT };
 int const caught_signals[] = { SIGILL, SIGFPE, SIGSEGV, SIGBUS, SIGSYS, SIGPIPE, 0 };
 
 struct sd_this {
-	int stack_depth;
-	int print_depth;
-	int error_count;
-	int crash_count;
 	sigjmp_buf *crash_jump;
+	int stack_depth;
 	char const *stack[MAX_DEPTH];
 };
 
+struct sd_sink {
+	int print_depth;
+	int error_count;
+	int crash_count;
+};
+
 static struct sd_this sd_this;
+static struct sd_sink sd_sink;
 
 static char const *name_of_signal(int signal)
 {
@@ -159,7 +163,7 @@ static void signal_handler(int signal)
 
 static void print_trace(void)
 {
-	int depth = sd_this.print_depth;
+	int depth = sd_sink.print_depth;
 	while (depth < sd_this.stack_depth) {
 		for (int i = 0; i < depth; ++i)
 			fputs(TEXT_DOTS, stdout);
@@ -167,7 +171,7 @@ static void print_trace(void)
 		puts(sd_this.stack[depth]);
 		++depth;
 	}
-	sd_this.print_depth = sd_this.stack_depth;
+	sd_sink.print_depth = sd_this.stack_depth;
 }
 
 static void report(int kind, int signal, int ln, char const *msg)
@@ -175,7 +179,7 @@ static void report(int kind, int signal, int ln, char const *msg)
 	char const *kind_name, *signal_name;
 	switch (kind) {
 		case FAIL:
-			++sd_this.error_count;
+			++sd_sink.error_count;
 			kind_name = "FAIL";
 			switch (signal) {
 				case THROW: signal_name = "throw"; break;
@@ -183,7 +187,7 @@ static void report(int kind, int signal, int ln, char const *msg)
 			}
 			break;
 		case CRASH:
-			++sd_this.crash_count;
+			++sd_sink.crash_count;
 			kind_name = "CRASH";
 			signal_name = name_of_signal(signal);
 			break;
@@ -213,10 +217,10 @@ void sd_init(void)
 void sd_report(int *errors, int *crashes)
 {
 	if (errors != NULL) {
-		*errors = sd_this.error_count;
+		*errors = sd_sink.error_count;
 	}
 	if (crashes != NULL) {
-		*crashes = sd_this.crash_count;
+		*crashes = sd_sink.crash_count;
 	}
 }
 
@@ -240,8 +244,8 @@ void sd_push(char const *format, ...)
 void sd_pop(void)
 {
 	free((char *)sd_this.stack[--sd_this.stack_depth]);
-	if (sd_this.print_depth > sd_this.stack_depth)
-		--sd_this.print_depth;
+	if (sd_sink.print_depth > sd_this.stack_depth)
+		--sd_sink.print_depth;
 }
 
 void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
