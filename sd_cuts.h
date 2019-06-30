@@ -31,7 +31,7 @@
 
 #include <setjmp.h>
 
-struct sd_branchsaves_ {
+struct sd_branch_saves_ {
 	int saved_depth;
 	void *saved_jump;
 };
@@ -45,34 +45,34 @@ void sd_push(char const *format, ...);
 void sd_pop(void);
 
 #define sd_branch(code) { \
-		struct sd_branchsaves_ s; \
+		struct sd_branch_saves_ s; \
 		sigjmp_buf my_jmp; \
 		int signal = sigsetjmp(my_jmp, 1); \
-		sd_branchbeg_(signal, &my_jmp, &s); \
+		sd_branch_beg_(signal, &my_jmp, &s); \
 		if (!signal) { \
 			code \
 		} \
-		sd_branchend_(&s); \
+		sd_branch_end_(&s); \
 	}
 
 #define SD_EPSILON 0.00001
 
 #define sd_throw(format, ...) sd_throw_(__LINE__, format, __VA_ARGS__)
-#define sd_assert(cond) sd_assert_(cond, #cond, __LINE__)
-#define sd_assertiq(a, b) sd_assertiq_(a, b, #a "==" #b, __LINE__)
-#define sd_assertfq(a, b) sd_assertfq_(a, b, SD_EPSILON, #a "==" #b, __LINE__)
-#define sd_assertsq(a, b) sd_assertsq_(a, b, #a "==" #b, __LINE__)
-#define sd_asserteq(a, b, e) sd_assertfq_(a, b, e, #a "==" #b, __LINE__)
+#define sd_assert(cond) sd_assert_(__LINE__, cond, #cond)
+#define sd_assertiq(a, b) sd_assertiq_(__LINE__, a, b, #a "==" #b)
+#define sd_assertfq(a, b) sd_assertfq_(__LINE__, a, b, SD_EPSILON, #a "==" #b)
+#define sd_assertsq(a, b) sd_assertsq_(__LINE__, a, b, #a "==" #b)
+#define sd_asserteq(a, b, e) sd_assertfq_(__LINE__, a, b, e, #a "==" #b)
 
 /* internal functions that have to be visible. */
 /* do not call these directly. */
 void sd_throw_(int ln, char const *format, ...);
-void sd_assert_(int cond, char const *str, int ln);
-void sd_assertiq_(long long a, long long b, char const *str, int ln);
-void sd_assertfq_(double a, double b, double e, char const *str, int ln);
-void sd_assertsq_(char const *a, char const *b, char const *str, int ln);
-void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s);
-void sd_branchend_(struct sd_branchsaves_ *s);
+void sd_assert_(int ln, int cond, char const *str);
+void sd_assertiq_(int ln, long long a, long long b, char const *str);
+void sd_assertfq_(int ln, double a, double b, double e, char const *str);
+void sd_assertsq_(int ln, char const *a, char const *b, char const *str);
+void sd_branch_beg_(int signal, sigjmp_buf *my_jmp, struct sd_branch_saves_ *s);
+void sd_branch_end_(struct sd_branch_saves_ *s);
 
 #endif
 
@@ -80,7 +80,7 @@ void sd_branchend_(struct sd_branchsaves_ *s);
 
 /* TODO make thread-safe */
 
-#ifdef SD_ASCII_ONLY
+#ifdef SD_OPTION_ASCII_ONLY
 
 # define TEXT_DOTS  ".."
 # define TEXT_HIER  "\\ "
@@ -161,6 +161,55 @@ static void signal_handler(int signal)
 	}
 }
 
+void sd_init(void)
+{
+	struct sigaction action;
+	memset(&action, 0, sizeof(struct sigaction));
+	action.sa_handler = signal_handler;
+	sigemptyset(&action.sa_mask);
+	/* TODO error checking */
+	int i;
+	for (i = 0; caught_signals[i] != 0; ++i) {
+		sigaction(caught_signals[i], &action, NULL);
+	}
+}
+
+void sd_report(int *errors, int *crashes)
+{
+	if (errors != NULL) {
+		*errors = sd_sink.error_count;
+	}
+	if (crashes != NULL) {
+		*crashes = sd_sink.crash_count;
+	}
+}
+
+void sd_summarize(void)
+{
+	int errors, crashes;
+	sd_report(&errors, &crashes);
+	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", errors, crashes);
+}
+
+void sd_push(char const *format, ...)
+{
+	char *str = malloc(MAX_NAME_LENGTH);
+
+	va_list va;
+	va_start(va, format);
+	vsnprintf(str, MAX_NAME_LENGTH, format, va);
+	va_end(va);
+
+	sd_this.stack[sd_this.stack_depth++] = str;
+}
+
+void sd_pop(void)
+{
+	free((char *)sd_this.stack[--sd_this.stack_depth]);
+	if (sd_sink.print_depth > sd_this.stack_depth)
+		--sd_sink.print_depth;
+}
+
 static void print_trace(void)
 {
 	int depth = sd_sink.print_depth;
@@ -201,64 +250,17 @@ static void report(int kind, int signal, int ln, char const *msg)
 	sd_pop();
 }
 
-void sd_init(void)
-{
-	struct sigaction action;
-	memset(&action, 0, sizeof(struct sigaction));
-	action.sa_handler = signal_handler;
-	sigemptyset(&action.sa_mask);
-	/* TODO error checking */
-	int i;
-	for (i = 0; caught_signals[i] != 0; ++i) {
-		sigaction(caught_signals[i], &action, NULL);
-	}
-}
-
-void sd_report(int *errors, int *crashes)
-{
-	if (errors != NULL) {
-		*errors = sd_sink.error_count;
-	}
-	if (crashes != NULL) {
-		*crashes = sd_sink.crash_count;
-	}
-}
-
-void sd_summarize(void)
-{
-	int errors, crashes;
-	sd_report(&errors, &crashes);
-	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", errors, crashes);
-}
-
-void sd_push(char const *format, ...)
-{
-	char *str = malloc(MAX_NAME_LENGTH);
-	va_list va;
-	va_start(va, format);
-	vsnprintf(str, MAX_NAME_LENGTH, format, va);
-	va_end(va);
-	sd_this.stack[sd_this.stack_depth++] = str;
-}
-
-void sd_pop(void)
-{
-	free((char *)sd_this.stack[--sd_this.stack_depth]);
-	if (sd_sink.print_depth > sd_this.stack_depth)
-		--sd_sink.print_depth;
-}
-
-void sd_branchbeg_(int signal, sigjmp_buf *my_jmp, struct sd_branchsaves_ *s)
+void sd_branch_beg_(int signal, sigjmp_buf *my_jmp, struct sd_branch_saves_ *s)
 {
 	if (signal) {
 		report(CRASH, signal, NO_LINENO, "");
 	} else {
-		*s = (struct sd_branchsaves_){sd_this.stack_depth, (void *)sd_this.crash_jump};
+		*s = (struct sd_branch_saves_){sd_this.stack_depth, (void *)sd_this.crash_jump};
 		sd_this.crash_jump = my_jmp;
 	}
 }
 
-void sd_branchend_(struct sd_branchsaves_ *s)
+void sd_branch_end_(struct sd_branch_saves_ *s)
 {
 	sd_this.crash_jump = s->saved_jump;
 	/* restore the stack in case of a crash. */
@@ -271,34 +273,37 @@ void sd_branchend_(struct sd_branchsaves_ *s)
 void sd_throw_(int ln, char const *format, ...)
 {
 	char *str = malloc(MAX_NAME_LENGTH);
+
 	va_list va;
 	va_start(va, format);
 	vsnprintf(str, MAX_NAME_LENGTH, format, va);
 	va_end(va);
+
 	report(FAIL, THROW, ln, str);
+
 	free(str);
 }
 
-void sd_assert_(int cond, char const *str, int ln)
+void sd_assert_(int ln, int cond, char const *str)
 {
 	if (!cond) report(FAIL, ASSERT, ln, str);
 }
 
-void sd_assertiq_(long long a, long long b, char const *str, int ln)
+void sd_assertiq_(int ln, long long a, long long b, char const *str)
 {
-	sd_assert_(a == b, str, ln);
+	sd_assert_(ln, a == b, str);
 }
 
-void sd_assertfq_(double a, double b, double e, char const *str, int ln)
+void sd_assertfq_(int ln, double a, double b, double e, char const *str)
 {
 	double d = a - b;
 	if (d < 0.0) d = -d;
-	sd_assert_(d <= e, str, ln);
+	sd_assert_(ln, d <= e, str);
 }
 
-void sd_assertsq_(char const *a, char const *b, char const *str, int ln)
+void sd_assertsq_(int ln, char const *a, char const *b, char const *str)
 {
-	sd_assert_(strcmp(a, b) != 0, str, ln);
+	sd_assert_(ln, strcmp(a, b) != 0, str);
 }
 
 #endif
