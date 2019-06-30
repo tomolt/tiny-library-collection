@@ -141,12 +141,12 @@ static struct sd_sink sd_sink;
 static char const *name_of_signal(int signal)
 {
 	switch (signal) {
-		case SIGILL:  return "SIGILL";  break;
-		case SIGFPE:  return "SIGFPE";  break;
-		case SIGSEGV: return "SIGSEGV"; break;
-		case SIGBUS:  return "SIGBUS";  break;
-		case SIGSYS:  return "SIGSYS";  break;
-		case SIGPIPE: return "SIGPIPE"; break;
+		case SIGILL:  return "illegal instruction (SIGILL)";  break;
+		case SIGFPE:  return "arithmetic exception (SIGFPE)";  break;
+		case SIGSEGV: return "segmentation fault (SIGSEGV)"; break;
+		case SIGBUS:  return "bus error (SIGBUS)";  break;
+		case SIGSYS:  return "illegal system call (SIGSYS)";  break;
+		case SIGPIPE: return "broken pipe (SIGPIPE)"; break;
 		/* the default path should never be taken, */
 		/* as only the above signals are actually caught. */
 		default: return "unknown signal"; break;
@@ -255,21 +255,20 @@ static void report(int kind, int signal, int ln, char const *msg)
 
 	print_trace();
 	print_nesting(sd_sink.print_depth + 1);
-	fprintf(sd_sink.pipe, "<%s> ", signal_name);
+	fprintf(sd_sink.pipe, "triggered %s", signal_name);
 	if (ln != NO_LINENO) {
-		fprintf(sd_sink.pipe, "L%03d: ", ln);
+		fprintf(sd_sink.pipe, " in line %03d", ln);
 	}
 	if (msg != NULL) {
-		fputs(msg, sd_sink.pipe);
+		fprintf(sd_sink.pipe, ": %s", msg);
 	}
-	fputs("\t\t" TEXT_ARROW " ", sd_sink.pipe);
-	fputs(kind_name, sd_sink.pipe);
+	fprintf(sd_sink.pipe, "\t\t" TEXT_ARROW " %s\n", kind_name);
 }
 
 void sd_branch_beg_(int signal, sigjmp_buf *my_jmp, struct sd_branch_saves_ *s)
 {
 	if (signal) {
-		report(CRASH, signal, NO_LINENO, "");
+		report(CRASH, signal, NO_LINENO, NULL);
 	} else {
 		*s = (struct sd_branch_saves_){sd_this.stack_depth, (void *)sd_this.crash_jump};
 		sd_this.crash_jump = my_jmp;
