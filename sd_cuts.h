@@ -44,6 +44,7 @@ struct sd_branch_saves_ {
 };
 
 void sd_init(FILE *pipe);
+int  sd_ismtsafe(void);
 
 void sd_summarize(void);
 
@@ -86,8 +87,6 @@ void sd_branch_end_(struct sd_branch_saves_ *s);
 
 #ifdef SD_IMPLEMENT_HERE
 
-/* TODO make thread-safe */
-
 #ifdef SD_OPTION_ASCII_ONLY
 
 # define TEXT_DOTS  ".."
@@ -104,12 +103,22 @@ void sd_branch_end_(struct sd_branch_saves_ *s);
 
 #endif
 
+#if (__STDC_VERSION__ >= 201112L) && (!defined __STDC_NO_THREADS__)
+# define HAVE_THREADS 1
+#else
+# define HAVE_THREADS 0
+#endif
+
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 
 #include <signal.h>
 #include <float.h>
+
+#if HAVE_THREADS
+# include <threads.h>
+#endif
 
 #define MAX_NAME_LENGTH 200
 #define MAX_DEPTH 50
@@ -132,6 +141,9 @@ struct sd_sink {
 	int print_depth;
 	int error_count;
 	int crash_count;
+#if HAVE_THREADS
+	mtx_t mutex;
+#endif
 };
 
 static struct sd_this sd_this;
@@ -154,6 +166,7 @@ static char const *name_of_signal(int signal)
 
 static void signal_handler(int signal)
 {
+	/* TODO make thread-safe */
 	if (sd_this.crash_jump != NULL) {
 		if (signal == SIGFPE) {
 			/* source: https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx */
@@ -171,6 +184,9 @@ static void signal_handler(int signal)
 
 void sd_init(FILE *pipe)
 {
+#if HAVE_THREADS
+	mtx_init(&sd_sink.mutex, mtx_plain);
+#endif
 	sd_sink.pipe = pipe;
 	struct sigaction action;
 	memset(&action, 0, sizeof(struct sigaction));
@@ -183,8 +199,17 @@ void sd_init(FILE *pipe)
 	}
 }
 
+int sd_ismtsafe(void)
+{
+	return HAVE_THREADS;
+}
+
 void sd_summarize(void)
 {
+#if HAVE_THREADS
+	mtx_lock(&sd_sink.mutex);
+#endif
+
 #ifndef SD_OPTION_PEDANTIC
 	if (sd_sink.error_count != 0 || sd_sink.crash_count != 0)
 #endif
@@ -193,6 +218,10 @@ void sd_summarize(void)
 			TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n",
 			sd_sink.error_count, sd_sink.crash_count);
 	}
+
+#if HAVE_THREADS
+	mtx_unlock(&sd_sink.mutex);
+#endif
 }
 
 void sd_push(char const *format, ...)
@@ -211,7 +240,7 @@ void sd_pop(void)
 {
 	free((char *)sd_this.stack[--sd_this.stack_depth]);
 	if (sd_sink.print_depth > sd_this.stack_depth)
-		--sd_sink.print_depth;
+		sd_sink.print_depth = sd_this.stack_depth;
 }
 
 static void print_nesting(int depth)
@@ -222,20 +251,12 @@ static void print_nesting(int depth)
 	fputs(TEXT_HIER, sd_sink.pipe);
 }
 
-static void print_trace(void)
-{
-	int depth = sd_sink.print_depth;
-	while (depth < sd_this.stack_depth) {
-		print_nesting(depth);
-		fputs(sd_this.stack[depth], sd_sink.pipe);
-		fputs("\n", sd_sink.pipe);
-		++depth;
-	}
-	sd_sink.print_depth = sd_this.stack_depth;
-}
-
 static void report(int kind, int signal, int ln, char const *msg)
 {
+#if HAVE_THREADS
+	mtx_lock(&sd_sink.mutex);
+#endif
+
 	char const *kind_name, *signal_name;
 	switch (kind) {
 		case FAIL:
@@ -253,7 +274,14 @@ static void report(int kind, int signal, int ln, char const *msg)
 			break;
 	}
 
-	print_trace();
+	int depth = sd_sink.print_depth;
+	while (depth < sd_this.stack_depth) {
+		print_nesting(depth);
+		fputs(sd_this.stack[depth], sd_sink.pipe);
+		fputs("\n", sd_sink.pipe);
+		++depth;
+	}
+	sd_sink.print_depth = sd_this.stack_depth;
 	print_nesting(sd_sink.print_depth);
 	fprintf(sd_sink.pipe, "triggered %s", signal_name);
 	if (ln != NO_LINENO) {
@@ -263,6 +291,10 @@ static void report(int kind, int signal, int ln, char const *msg)
 		fprintf(sd_sink.pipe, ": %s", msg);
 	}
 	fprintf(sd_sink.pipe, "\t\t" TEXT_ARROW " %s\n", kind_name);
+
+#if HAVE_THREADS
+	mtx_unlock(&sd_sink.mutex);
+#endif
 }
 
 void sd_branch_beg_(int signal, sigjmp_buf *my_jmp, struct sd_branch_saves_ *s)
