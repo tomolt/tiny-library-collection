@@ -26,17 +26,24 @@
  * tiny library collection. (https://www.github.com/tomolt/tiny-library-collection)
  */
 
+/*
+ * SD_OPTION_ASCII_ONLY
+ * SD_OPTION_PEDANTIC
+ * SD_OPTION_EPSILON
+ */
+
 #ifndef SD_CUTS_H
 #define SD_CUTS_H
 
 #include <setjmp.h>
+#include <stdio.h>
 
 struct sd_branch_saves_ {
 	int saved_depth;
 	void *saved_jump;
 };
 
-void sd_init(void);
+void sd_init(FILE *pipe);
 
 void sd_report(int *errors, int *crashes);
 void sd_summarize(void);
@@ -55,12 +62,14 @@ void sd_pop(void);
 		sd_branch_end_(&s); \
 	}
 
-#define SD_EPSILON 0.00001
+#ifndef SD_OPTION_EPSILON
+# define SD_OPTION_EPSILON 0.00001
+#endif
 
 #define sd_throw(format, ...) sd_throw_(__LINE__, format, __VA_ARGS__)
 #define sd_assert(cond) sd_assert_(__LINE__, cond, #cond)
 #define sd_assertiq(a, b) sd_assertiq_(__LINE__, a, b, #a "==" #b)
-#define sd_assertfq(a, b) sd_assertfq_(__LINE__, a, b, SD_EPSILON, #a "==" #b)
+#define sd_assertfq(a, b) sd_assertfq_(__LINE__, a, b, SD_OPTION_EPSILON, #a "==" #b)
 #define sd_assertsq(a, b) sd_assertsq_(__LINE__, a, b, #a "==" #b)
 #define sd_asserteq(a, b, e) sd_assertfq_(__LINE__, a, b, e, #a "==" #b)
 
@@ -96,7 +105,6 @@ void sd_branch_end_(struct sd_branch_saves_ *s);
 
 #endif
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
@@ -112,7 +120,7 @@ enum { THROW, ASSERT };
 
 #define NO_LINENO -1
 
-int const caught_signals[] = { SIGILL, SIGFPE, SIGSEGV, SIGBUS, SIGSYS, SIGPIPE, 0 };
+static int const caught_signals[] = { SIGILL, SIGFPE, SIGSEGV, SIGBUS, SIGSYS, SIGPIPE, 0 };
 
 struct sd_this {
 	sigjmp_buf *crash_jump;
@@ -121,6 +129,7 @@ struct sd_this {
 };
 
 struct sd_sink {
+	FILE *pipe;
 	int print_depth;
 	int error_count;
 	int crash_count;
@@ -161,8 +170,9 @@ static void signal_handler(int signal)
 	}
 }
 
-void sd_init(void)
+void sd_init(FILE *pipe)
 {
+	sd_sink.pipe = pipe;
 	struct sigaction action;
 	memset(&action, 0, sizeof(struct sigaction));
 	action.sa_handler = signal_handler;
@@ -180,7 +190,8 @@ void sd_summarize(void)
 	if (sd_sink.error_count != 0 || sd_sink.crash_count != 0)
 #endif
 	{
-		printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n",
+		fprintf(sd_sink.pipe,
+			TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n",
 			sd_sink.error_count, sd_sink.crash_count);
 	}
 }
@@ -209,9 +220,9 @@ static void print_trace(void)
 	int depth = sd_sink.print_depth;
 	while (depth < sd_this.stack_depth) {
 		for (int i = 0; i < depth; ++i)
-			fputs(TEXT_DOTS, stdout);
-		fputs(TEXT_HIER, stdout);
-		puts(sd_this.stack[depth]);
+			fputs(TEXT_DOTS, sd_sink.pipe);
+		fputs(TEXT_HIER, sd_sink.pipe);
+		fputs(sd_this.stack[depth], sd_sink.pipe);
 		++depth;
 	}
 	sd_sink.print_depth = sd_this.stack_depth;
@@ -293,9 +304,9 @@ void sd_assertfq_(int ln, double a, double b, double e, char const *str)
 	/* because of the rounding behaviour of floating-point numbers, two expressions */
 	/* that mathematically should evaluate to the same value can actually differ in */
 	/* the lower digits. For user convenience sd_assertfq() therefore allow a small */
-	/* difference between a and b (which is controlled via SD_EPSILON). */
-	/* If the user wants to use another epsilon value, he can either modify the header */
-	/* directly or write his own macro wrapping sd_assertfq_(). */
+	/* difference between a and b. */
+	/* If the user wants to use another epsilon value, he can either define his own */
+	/* epsilon via SD_OPTION_EPSILON or write his own macro wrapping sd_assertfq_(). */
 	/* If exact comparison is wanted, one can always use sd_assert(a == b). */
 	double d = a - b;
 	if (d < 0.0) d = -d; /* same as: d = fabsf(d); */

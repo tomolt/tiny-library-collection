@@ -9,7 +9,7 @@ void sd_cuts_suite(void);
 
 int main()
 {
-	sd_init();
+	sd_init(stdout);
 	sd_branch (
 		calm_suite();
 	)
