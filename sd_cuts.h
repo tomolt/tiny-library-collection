@@ -215,13 +215,19 @@ void sd_pop(void)
 		--sd_sink.print_depth;
 }
 
+static void print_nesting(int depth)
+{
+	int i;
+	for (i = 0; i < depth; ++i)
+		fputs(TEXT_DOTS, sd_sink.pipe);
+	fputs(TEXT_HIER, sd_sink.pipe);
+}
+
 static void print_trace(void)
 {
 	int depth = sd_sink.print_depth;
 	while (depth < sd_this.stack_depth) {
-		for (int i = 0; i < depth; ++i)
-			fputs(TEXT_DOTS, sd_sink.pipe);
-		fputs(TEXT_HIER, sd_sink.pipe);
+		print_nesting(depth);
 		fputs(sd_this.stack[depth], sd_sink.pipe);
 		++depth;
 	}
@@ -246,13 +252,18 @@ static void report(int kind, int signal, int ln, char const *msg)
 			signal_name = name_of_signal(signal);
 			break;
 	}
-	if (ln == NO_LINENO) {
-		sd_push("<%s> %s\t\t" TEXT_ARROW "%s", signal_name, msg, kind_name);
-	} else {
-		sd_push("<%s> L%03d: %s\t\t" TEXT_ARROW "%s", signal_name, ln, msg, kind_name);
-	}
+
 	print_trace();
-	sd_pop();
+	print_nesting(sd_sink.print_depth + 1);
+	fprintf(sd_sink.pipe, "<%s> ", signal_name);
+	if (ln != NO_LINENO) {
+		fprintf(sd_sink.pipe, "L%03d: ", ln);
+	}
+	if (msg != NULL) {
+		fputs(msg, sd_sink.pipe);
+	}
+	fputs("\t\t" TEXT_ARROW " ", sd_sink.pipe);
+	fputs(kind_name, sd_sink.pipe);
 }
 
 void sd_branch_beg_(int signal, sigjmp_buf *my_jmp, struct sd_branch_saves_ *s)
