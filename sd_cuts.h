@@ -174,21 +174,15 @@ void sd_init(void)
 	}
 }
 
-void sd_report(int *errors, int *crashes)
-{
-	if (errors != NULL) {
-		*errors = sd_sink.error_count;
-	}
-	if (crashes != NULL) {
-		*crashes = sd_sink.crash_count;
-	}
-}
-
 void sd_summarize(void)
 {
-	int errors, crashes;
-	sd_report(&errors, &crashes);
-	printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n", errors, crashes);
+#ifndef SD_OPTION_PEDANTIC
+	if (sd_sink.error_count != 0 || sd_sink.crash_count != 0)
+#endif
+	{
+		printf(TEXT_LINE " %d failures, %d crashes " TEXT_LINE "\n",
+			sd_sink.error_count, sd_sink.crash_count);
+	}
 }
 
 void sd_push(char const *format, ...)
@@ -296,8 +290,15 @@ void sd_assertiq_(int ln, long long a, long long b, char const *str)
 
 void sd_assertfq_(int ln, double a, double b, double e, char const *str)
 {
+	/* because of the rounding behaviour of floating-point numbers, two expressions */
+	/* that mathematically should evaluate to the same value can actually differ in */
+	/* the lower digits. For user convenience sd_assertfq() therefore allow a small */
+	/* difference between a and b (which is controlled via SD_EPSILON). */
+	/* If the user wants to use another epsilon value, he can either modify the header */
+	/* directly or write his own macro wrapping sd_assertfq_(). */
+	/* If exact comparison is wanted, one can always use sd_assert(a == b). */
 	double d = a - b;
-	if (d < 0.0) d = -d;
+	if (d < 0.0) d = -d; /* same as: d = fabsf(d); */
 	sd_assert_(ln, d <= e, str);
 }
 
