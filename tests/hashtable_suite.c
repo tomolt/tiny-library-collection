@@ -3,7 +3,7 @@
 #include <math.h>
 #include <string.h>
 
-#include "sd_cuts.h"
+#include "dh_cuts.h"
 
 #define HT_IMPLEMENT_HERE
 #include "hashtable.h"
@@ -19,12 +19,12 @@ char *my_strdup(char const *string)
 void test_insertions(void)
 {
 #define NUM_ITERATIONS 5000
-	sd_push("batch insertions and lookups");
+	dh_push("batch insertions and lookups");
 	struct HT ht = htNew(500, sizeof(int));
 	int values[NUM_ITERATIONS];
 	char const *keys[NUM_ITERATIONS];
 	for (int i = 0; i < NUM_ITERATIONS; ++i) {
-		sd_push("insertion #%d", i);
+		dh_push("insertion #%d", i);
 		int rd = rand() % 0xFFFF;
 		char buf[50];
 		sprintf(buf, "%x", rd);
@@ -32,24 +32,24 @@ void test_insertions(void)
 		htSet(&ht, name, strlen(name), &rd);
 		values[i] = rd;
 		keys[i] = name;
-		sd_pop();
+		dh_pop();
 	}
 	for (int i = 0; i < NUM_ITERATIONS; ++i) {
-		sd_push("lookup #%d", i);
+		dh_push("lookup #%d", i);
 		int has = htHas(&ht, keys[i], strlen(keys[i]));
-		sd_assert(has);
+		dh_assert(has);
 		if (has) {
-			sd_assertiq(*(int*)htGet(&ht, keys[i], strlen(keys[i])), values[i]);
+			dh_assertiq(*(int*)htGet(&ht, keys[i], strlen(keys[i])), values[i]);
 		}
-		sd_pop();
+		dh_pop();
 	}
 	htFree(&ht);
-	sd_pop();
+	dh_pop();
 }
 
 void hashtable_suite(void)
 {
-	sd_push("hashtable");
+	dh_push("hashtable");
 	test_insertions();
-	sd_pop();
+	dh_pop();
 }

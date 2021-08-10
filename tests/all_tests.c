@@ -1,25 +1,25 @@
 #include <stdlib.h>
 
-#define SD_IMPLEMENT_HERE
-#include "sd_cuts.h"
+#define DH_IMPLEMENT_HERE
+#include "dh_cuts.h"
 
 void calm_suite(void);
 void hashtable_suite(void);
-void sd_cuts_suite(void);
+void dh_cuts_suite(void);
 
 int main()
 {
-	sd_init(stdout);
-	sd_branch (
+	dh_init(stdout);
+	dh_branch (
 		calm_suite();
 	)
-	sd_branch (
+	dh_branch (
 		hashtable_suite();
 	)
-	sd_branch (
-		sd_cuts_suite();
+	dh_branch (
+		dh_cuts_suite();
 	)
-	sd_summarize();
+	dh_summarize();
 	return EXIT_SUCCESS;
 }
 

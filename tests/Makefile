@@ -12,4 +12,4 @@ clean:
 	$(RM) all_tests
 	$(RM) *.o
 
-all_tests: calm_suite.o hashtable_suite.o sd_cuts_suite.o
+all_tests: calm_suite.o hashtable_suite.o dh_cuts_suite.o
